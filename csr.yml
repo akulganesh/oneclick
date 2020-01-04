@@ -1,0 +1,58 @@
+---
+- hosts: master:client
+  gather_facts: no
+  become: true
+  become_user: root
+  vars:
+    ansible_python_interpreter: /usr/bin/python2.7
+  tasks:
+  - name: creating pki directory under the /opt/cloudera/
+    file: 
+      path: /opt/cloudera/security/pki
+      state: ditectory
+      owner: root
+      group: cloudera-scm
+  - name: generate a Java keystore and certificate signing request
+    command: $JAVA_HOME/bin/keytool -genkeypair -alias $(hostname -f) \
+            -keyalg RSA -keystore /opt/cloudera/security/pki/$(hostname -f).jks \
+            -keysize 2048 -dname "CN=$(hostname -f),OU=Hadoop,O=Manuh,L=Vizag,ST=AP,C=US" -ext san=dns:$(hostname -f) \
+            -storepass "Ganesh@123" -keypass "Ganesh@123"
+  - name: Adding file permissions
+    file:
+      path: /opt/cloudera/security/pki/$(hostname -f).jks
+      mode: 0440
+      remote_src: yes
+  - name: CSR generation
+    command: $JAVA_HOME/bin/keytool -certreq -alias $(hostname -f) -keystore /opt/cloudera/security/pki/$(hostname -f).jks \
+             -file /opt/cloudera/security/pki/$(hostname -f).csr \
+             -ext san=dns:$(hostname -f) -ext EKU=serverAuth,clientAuth  -storepass "Ganesh@123"
+  - name: Adding file permissions
+    file:
+      path: /opt/cloudera/security/pki/$(hostname -f).csr
+      mode: 0444
+      remote_src: yes
+  - name: Export the Private Key to a File
+    command: $JAVA_HOME/bin/keytool -importkeystore -srckeystore /opt/cloudera/security/pki/$(hostname -f).jks \
+             -srcstorepass "Ganesh@123" -srckeypass "Ganesh@123" \
+             -destkeystore /opt/cloudera/security/pki/$(hostname -f)-key.p12 \
+             -deststoretype PKCS12 -srcalias $(hostname -f) -srcstorepass "Ganesh@123" -srckeypass "Ganesh@123"
+  - name: Export the Private Key to a File openssl command to export the private key into its own file
+    command: openssl pkcs12 -in /opt/cloudera/security/pki/$(hostname -f)-key.p12 \
+             -passin "pass:Ganesh@123" -nocerts -out /opt/cloudera/security/pki/$(hostname -f).key
+             
+  - name: Adding file permissions
+    file:
+      path: /opt/cloudera/security/pki/$(hostname -f).key
+      mode: 0400
+      remote_src: yes
+  - name: Create a symbolic link for the .key file
+    command: ln -s /opt/cloudera/security/pki/$(hostname -f).key /opt/cloudera/security/pki/agent.key
+  - name: Create a Password File
+    file:
+      path: /etc/cloudera-scm-agent/agentkey.pw
+      state: touch
+      mode: 0440
+      owner: root
+      group: root
+  - name: adding password into agentkey.pwd
+    shell: echo 'Ganesh@123' >> /etc/cloudera-scm-agent/agentkey.pw
